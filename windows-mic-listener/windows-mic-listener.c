@@ -15,8 +15,8 @@
 #define COBJMACROS
 #define CINTERFACE
 
-#include <windows.h>
 #include <initguid.h>
+#include <windows.h>
 #include <mmdeviceapi.h>
 #include <audiopolicy.h>
 #include <stdio.h>
