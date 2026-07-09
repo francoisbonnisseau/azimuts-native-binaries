@@ -30,6 +30,8 @@ jobs:
           mkdir -p build dist .swift-module-cache
           info_plist="macos-audio-tap/macos-audio-tap-Info.plist"
           test -f "$info_plist"
+          grep -q "NSAudioCaptureUsageDescription" "$info_plist"
+          grep -q "silent_capture" macos-audio-tap/macos-audio-tap.swift
           xcrun swiftc macos-audio-tap/macos-audio-tap.swift \
             -O \
             -target "${{ matrix.target }}" \
@@ -47,9 +49,8 @@ jobs:
           codesign --force --options runtime --identifier com.openwhispr.audio-tap --sign - build/macos-audio-tap
           codesign --verify --deep --strict build/macos-audio-tap
           codesign -d --verbose=4 build/macos-audio-tap 2>&1 | tee build/macos-audio-tap.codesign.txt
+          grep -Eq "Info.plist entries=[1-9][0-9]*" build/macos-audio-tap.codesign.txt
           file build/macos-audio-tap | tee build/macos-audio-tap.file.txt
-          strings -a build/macos-audio-tap | grep -q "NSAudioCaptureUsageDescription"
-          strings -a build/macos-audio-tap | grep -q "silent_capture"
           if [ "${{ matrix.arch }}" = "x64" ]; then
             grep -q "x86_64" build/macos-audio-tap.file.txt
           else
