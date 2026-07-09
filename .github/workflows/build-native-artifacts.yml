@@ -6,7 +6,7 @@ on:
       tag:
         description: Release tag to create or update
         required: true
-        default: azimuts-native-helpers-v1.0.0
+        default: azimuts-native-helpers-v1.1.0
 
 permissions:
   contents: write
@@ -28,6 +28,8 @@ jobs:
       - name: Build macOS audio tap
         run: |
           mkdir -p build dist .swift-module-cache
+          info_plist="macos-audio-tap/macos-audio-tap-Info.plist"
+          test -f "$info_plist"
           xcrun swiftc macos-audio-tap/macos-audio-tap.swift \
             -O \
             -target "${{ matrix.target }}" \
@@ -36,9 +38,23 @@ jobs:
             -framework CoreAudio \
             -framework AudioToolbox \
             -framework AVFoundation \
-            -framework Foundation
+            -framework Foundation \
+            -Xlinker -sectcreate \
+            -Xlinker __TEXT \
+            -Xlinker __info_plist \
+            -Xlinker "$info_plist"
           chmod 755 build/macos-audio-tap
-          file build/macos-audio-tap
+          codesign --force --options runtime --identifier com.openwhispr.audio-tap --sign - build/macos-audio-tap
+          codesign --verify --deep --strict build/macos-audio-tap
+          codesign -d --verbose=4 build/macos-audio-tap 2>&1 | tee build/macos-audio-tap.codesign.txt
+          file build/macos-audio-tap | tee build/macos-audio-tap.file.txt
+          strings build/macos-audio-tap | grep -q "NSAudioCaptureUsageDescription"
+          strings build/macos-audio-tap | grep -q "silent_capture"
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            grep -q "x86_64" build/macos-audio-tap.file.txt
+          else
+            grep -q "arm64" build/macos-audio-tap.file.txt
+          fi
           tar -czf "dist/macos-audio-tap-darwin-${{ matrix.arch }}.tar.gz" -C build macos-audio-tap
       - uses: actions/upload-artifact@v4
         with:
@@ -81,9 +97,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
+          version="${TAG#azimuts-native-helpers-v}"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --title "Azimuts Native Helpers v1.0.0" \
+              --title "Azimuts Native Helpers v$version" \
               --notes "Native helper artifacts built from Azimuts Desktop sources for reproducible pilot builds."
           gh release upload "$TAG" \
             dist/macos-audio-tap-darwin-arm64.tar.gz \

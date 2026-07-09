@@ -23,6 +23,15 @@ final class AudioTapCapture {
     private var sourceFormat: AVAudioFormat?
     private var pendingPCM = Data()
     private var stopping = false
+    private var sawNonZeroSample = false
+    private var leadingZeroBytes = 0
+    private var silenceWarningEmitted = false
+    // A TCC denial is indistinguishable from silence at the API level: every call succeeds
+    // and the tap streams perfectly clocked all-zero buffers. Digital zeros this long are
+    // near-impossible with a granted tap while any app plays audio, so surface a warning.
+    private var silenceWarningThresholdBytes: Int {
+        Int(config.sampleRate) * 2 * 2 // 2 seconds of 16-bit mono
+    }
 
     init(config: Config) {
         self.config = config
@@ -253,8 +262,37 @@ final class AudioTapCapture {
             return
         }
 
+        trackSignalPresence(data: data, byteCount: Int(audioBuffer.mDataByteSize))
         pendingPCM.append(data.assumingMemoryBound(to: UInt8.self), count: Int(audioBuffer.mDataByteSize))
         flushFullChunks()
+    }
+
+    private func trackSignalPresence(data: UnsafeMutableRawPointer, byteCount: Int) {
+        if sawNonZeroSample {
+            return
+        }
+
+        let samples = data.assumingMemoryBound(to: Int16.self)
+        for index in 0..<(byteCount / 2) where samples[index] != 0 {
+            sawNonZeroSample = true
+            if silenceWarningEmitted {
+                emit(event: ["type": "info", "code": "capture_signal_detected"])
+            }
+            return
+        }
+
+        leadingZeroBytes += byteCount
+        if !silenceWarningEmitted, leadingZeroBytes >= silenceWarningThresholdBytes {
+            silenceWarningEmitted = true
+            emit(event: [
+                "type": "warning",
+                "code": "silent_capture",
+                "message": "Tap is running but has produced only digital silence. "
+                    + "This usually means the System Audio Recording permission is not granted "
+                    + "to the responsible app (System Settings > Privacy & Security > "
+                    + "Screen & System Audio Recording).",
+            ])
+        }
     }
 
     private func flushFullChunks() {
